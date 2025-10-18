@@ -457,10 +457,14 @@ def WorkerThread(books):
 
             # timeout in seconds before next scrape
             if TIMEOUTS and nOrigBooks > nIgnored + nRenamed:
-                cPause = Trans(140).replace("%%", str(TIMEOUTS))
-                f.Update(cPause, 0, False)
-                f.Refresh()
+                REMAINING_TIME = int(TIMEOUTS)
                 for ii in range(20*int(TIMEOUTS)):
+                    # Updates the remaining time every second (countdown)
+                    if ii % 20 == 0:
+                        cPause = Trans(140).replace("%%", str(REMAINING_TIME))
+                        f.Update(cPause, 0, False)
+                        f.Refresh()
+                        REMAINING_TIME -= 1
                     t.CurrentThread.Join(50)
                     Application.DoEvents()
                     if bStopit:
@@ -832,8 +836,9 @@ def parseSerieInfo(book, serieUrl, lDirect):
                     SerieState = Trans(54)
                 elif ("one shot" in fin.lower()) and (dlgNumber.lower() != "one shot"):
                     book.SeriesComplete = YesNo.Yes
+                    book.Number = "OS"
                     if ONESHOTFORMAT and not CBFormat:
-                        book.Format = "One Shot"
+                        book.Format = "One-Shot"
                     SerieState = Trans(54)
                 elif ("cours" in fin):
                     book.SeriesComplete = YesNo.No
@@ -1293,8 +1298,8 @@ def parseAlbumInfo(book, pageUrl, num, lDirect = False):
                 except:
                     NewTitle = pickedVar.Title
 
-                if NewTitle.lower() == series.lower():
-                    NewTitle = ""
+                # if NewTitle.lower() == series.lower():
+                #     NewTitle = ""
 
                 book.Title = NewTitle
                 debuglog(Trans(29), book.Title)
