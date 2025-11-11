@@ -485,7 +485,7 @@ def WorkerThread(books):
                 f.StartCountdown(timeoutSeconds, book)
                 
                 # Check for cancellation every 50ms (responsive cancel button)
-                # Timer updates UI every 250ms independently
+                # Timer updates UI every 100ms independently (smooth countdown animation)
                 totalIterations = timeoutSeconds * 20  # 20 iterations per second
                 for ii in range(totalIterations):
                     t.CurrentThread.Join(50)
@@ -1895,9 +1895,9 @@ class ProgressBarDialog(Form):
         self.Controls.Add(self.cancel)
         self.Controls.Add(self.cover)
 
-        # Timer for smooth countdown updates (250ms)
+        # Timer for smooth countdown updates (100ms)
         self._countdownTimer = System.Windows.Forms.Timer()
-        self._countdownTimer.Interval = 250  # 250ms
+        self._countdownTimer.Interval = 100
         self._countdownTimer.Tick += self._OnCountdownTick
         
         # Countdown state
@@ -1949,11 +1949,11 @@ class ProgressBarDialog(Form):
         self._countdownElapsedMs = 0
         self._isWaiting = True
         
-        # Show countdown bar
+        # Show countdown bar - start FULL and will empty progressively
         if not self.IsDisposed and self.pbCountdown:
             self.pbCountdown.Visible = True
-            self.pbCountdown.Value = 0
             self.pbCountdown.Maximum = self._countdownTotalMs
+            self.pbCountdown.Value = self._countdownTotalMs
         
         # Update cover with checkmark overlay
         if not self.IsDisposed:
@@ -1976,7 +1976,6 @@ class ProgressBarDialog(Form):
             self._countdownTimer.Start()
         
     def StopCountdown(self):
-        """Stop the countdown timer and hide the countdown bar."""
         if self._countdownTimer:
             self._countdownTimer.Stop()
         self._isWaiting = False
@@ -1985,25 +1984,22 @@ class ProgressBarDialog(Form):
             self.pbCountdown.Value = 0
         
     def _OnCountdownTick(self, sender, e):
-        """
-        Timer tick handler - updates countdown progress every 250ms.
-        Called by the UI thread, so thread-safe.
-        """
         # Safety check: don't access disposed controls
         if self.IsDisposed or not self._isWaiting:
             if self._countdownTimer:
                 self._countdownTimer.Stop()
             return
             
-        self._countdownElapsedMs += 250
+        self._countdownElapsedMs += 100
         
         if self._countdownElapsedMs >= self._countdownTotalMs:
             # Countdown complete
             self.StopCountdown()
         else:
-            # Update progress bar (with safety check)
+            # Update progress bar - calculate REMAINING time (starts full, empties)
             if not self.IsDisposed and self.pbCountdown:
-                self.pbCountdown.Value = min(self._countdownElapsedMs, self._countdownTotalMs)
+                remainingMs = self._countdownTotalMs - self._countdownElapsedMs
+                self.pbCountdown.Value = max(0, remainingMs) 
             
             # Update status text with remaining seconds (with safety check)
             if not self.IsDisposed and self.traitement:
