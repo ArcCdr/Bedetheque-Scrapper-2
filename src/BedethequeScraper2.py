@@ -477,16 +477,8 @@ def WorkerThread(books):
                 f.Refresh()
                 # Graphical countdown with checkmark book cover overlay
                 timeoutSeconds = int(TIMEOUTS)
-                # Sanity check: limit to reasonable timeout (max 3600 seconds = 1 hour)
-                if timeoutSeconds > 3600:
-                    debuglog("WARNING: TIMEOUTS value too large (" + str(timeoutSeconds) + "), capping at 3600 seconds")
-                    timeoutSeconds = 3600
-                
                 f.StartCountdown(timeoutSeconds, book)
-                
-                # Check for cancellation every 50ms (responsive cancel button)
-                # Timer updates UI every 100ms independently (smooth countdown animation)
-                totalIterations = timeoutSeconds * 20  # 20 iterations per second
+                totalIterations = timeoutSeconds * 20
                 for ii in range(totalIterations):
                     t.CurrentThread.Join(50)
                     Application.DoEvents()
@@ -2019,8 +2011,8 @@ class ProgressBarDialog(Form):
         g = System.Drawing.Graphics.FromImage(result)
         g.DrawImage(baseCover, 0, 0, width, height)
         
-        # Draw checkmark (40% of image width)
-        checkSize = int(width * 0.4)
+        # Draw checkmark - LARGE (90% of image width)
+        checkSize = int(width * 0.9)
         checkX = int((width - checkSize) / 2)
         checkY = int((height - checkSize) / 2)
         
@@ -2028,7 +2020,8 @@ class ProgressBarDialog(Form):
         checkColor = System.Drawing.Color.FromArgb(220, 34, 139, 34) 
         
         # Create pen for checkmark (thick, round)
-        pen = System.Drawing.Pen(checkColor, max(8, int(checkSize / 15)))
+        penWidth = max(12, int(checkSize / 12))
+        pen = System.Drawing.Pen(checkColor, penWidth)
         pen.StartCap = System.Drawing.Drawing2D.LineCap.Round
         pen.EndCap = System.Drawing.Drawing2D.LineCap.Round
         pen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round
