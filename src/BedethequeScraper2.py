@@ -50,7 +50,7 @@ BasicXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><configuration></configura
 
 CookieContainer = System.Net.CookieContainer()
 
-VERSION = "6.03"
+VERSION = "6.04"
 
 SHOWRENLOG = False
 SHOWDBGLOG = False
@@ -59,6 +59,8 @@ DBGLOGMAX = 10000
 RENLOGMAX = 10000
 LANGENFR = "FR"
 TBTags = ""
+CBReview = False
+CBSeriesTags = False
 CBCover = True
 CBStatus = True
 CBGenre = True
@@ -99,6 +101,7 @@ TIMEOUTS = "7"
 TIMEPOPUP = "30"
 PadNumber = "0"
 Serie_Resume = ""
+Serie_Tags = ""
 ONESHOTFORMAT = False
 bStopit = False
 AlwaysChooseSerie = False
@@ -149,6 +152,10 @@ SERIE_COUNTOF = re.compile(SERIE_COUNTOF_PATTERN, re.IGNORECASE | re.MULTILINE |
 
 SERIE_HEADER2_PATTERN = r'<h3(.+?)</p'
 SERIE_HEADER2 = re.compile(SERIE_HEADER2_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+# Series tags pattern
+SERIE_TAGS_PATTERN = r'<a\sclass="buttonflat\swhite\sbt-xs\smot-cle"\shref="[^"]*">([^<]+)</a>'
+SERIE_TAGS = re.compile(SERIE_TAGS_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 # Info Serie for Quickscrape
 
@@ -219,6 +226,14 @@ ALBUM_RESUME = re.compile(ALBUM_RESUME_PATTERN, re.IGNORECASE | re.MULTILINE | r
 
 ALBUM_INFOEDITION_PATTERN = r'<em>Info\s.*?dition\s:\s?</em>\s?(.*?)<'
 ALBUM_INFOEDITION = re.compile(ALBUM_INFOEDITION_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+# Album review pattern (chronique widget)
+ALBUM_REVIEW_WIDGET_PATTERN = r'<div\sclass="magazine-widget\schronique">.*?<a\shref="(https://www\.bdgest\.com/chronique-[^"]+)"'
+ALBUM_REVIEW_WIDGET = re.compile(ALBUM_REVIEW_WIDGET_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+# Review text pattern (from chronique page)
+REVIEW_TEXT_PATTERN = r'<p\sclass="chronique"\sitemprop="articleBody">(.*?)</p>'
+REVIEW_TEXT = re.compile(REVIEW_TEXT_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 ALBUM_URL_PATTERN = r'<label>%s<span\sclass="numa.*?\.<.*?<a\shref="(.*?)"\s.*?title=.+?">(.+?)</'
 
@@ -457,19 +472,20 @@ def WorkerThread(books):
 
             # timeout in seconds before next scrape
             if TIMEOUTS and nOrigBooks > nIgnored + nRenamed:
-                REMAINING_TIME = int(TIMEOUTS)
-                for ii in range(20*int(TIMEOUTS)):
-                    # Updates the remaining time every second (countdown)
-                    if ii % 20 == 0:
-                        cPause = Trans(140).replace("%%", str(REMAINING_TIME))
-                        f.Update(cPause, 0, False)
-                        f.Refresh()
-                        REMAINING_TIME -= 1
+                cPause = Trans(140).replace("%%", str(TIMEOUTS))
+                f.Update(cPause, 0, False)
+                f.Refresh()
+                # Graphical countdown with checkmark book cover overlay
+                f.StartCountdown(int(TIMEOUTS), book)
+                totalIterations = int(TIMEOUTS * 20)
+                for ii in range(totalIterations):
                     t.CurrentThread.Join(50)
                     Application.DoEvents()
                     if bStopit:
+                        f.StopCountdown()
                         debuglog("Cancelled from WorkerThread TIMEOUT Loop")
                         return
+                f.StopCountdown()                
             if bStopit:
                 debuglog("Cancelled from WorkerThread End")
                 return
@@ -703,7 +719,7 @@ def SetAlbumInformation(book, serieUrl, serie, num):
 
 def parseSerieInfo(book, serieUrl, lDirect):
 
-    global Serie_Resume, SkipAlbum
+    global Serie_Resume, Serie_Tags, SkipAlbum
 
     debuglog("=" * 60)
     debuglog("parseSerieInfo", "a)", serieUrl, "b)", lDirect)
@@ -857,6 +873,17 @@ def parseSerieInfo(book, serieUrl, lDirect):
                     langue = nameRegex.group(1).strip()
                     debuglog(Trans(36), langue[:2])
                     book.LanguageISO = dLang[langue[:2]]
+
+            # Series Tags
+            if CBSeriesTags:
+                tagMatches = SERIE_TAGS.findall(Entete)
+                if tagMatches:
+                    Serie_Tags = ", ".join(tagMatches)
+                    debuglog("Series tags = " + Serie_Tags)
+                else:
+                    Serie_Tags = ""
+            else:
+                Serie_Tags = ""
 
             #Default Values
             if not CBDefault:
@@ -1304,10 +1331,31 @@ def parseAlbumInfo(book, pageUrl, num, lDirect = False):
                 book.Title = NewTitle
                 debuglog(Trans(29), book.Title)
 
+            # Tags handling
             if TBTags == "DEL":
+                # User wants to delete all tags, takes precedence over everything
                 book.Tags = ""
-            elif TBTags != "":
-                book.Tags = TBTags
+            else:
+                # Merge series tags with user-defined tags
+                tagsList = []
+                
+                # Add series tags if configured
+                if CBSeriesTags and Serie_Tags:
+                    tagsList.extend([tag.strip() for tag in Serie_Tags.split(",")])
+                
+                # Add user-defined tags if any
+                if TBTags != "":
+                    tagsList.extend([tag.strip() for tag in TBTags.split(",")])
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                uniqueTags = []
+                for tag in tagsList:
+                    if tag and tag not in seen:
+                        seen.add(tag)
+                        uniqueTags.append(tag)
+                
+                book.Tags = ", ".join(uniqueTags) if uniqueTags else ""
 
             if CBWriter:
                 book.Writer = getGenericBookArtists([ALBUM_SCENAR_MULTI_AUTHOR, ALBUM_STORYBOARD_MULTI_AUTHOR], info, Trans(30))
@@ -1439,6 +1487,35 @@ def parseAlbumInfo(book, pageUrl, num, lDirect = False):
                 #Send Summary to book
                 if summary:
                     book.Summary = summary
+
+            # Review/Chronique
+            if CBReview:
+                nameRegex = ALBUM_REVIEW_WIDGET.search(info, 0)
+                if nameRegex:
+                    reviewUrl = nameRegex.group(1)
+                    debuglog("Found review widget, fetching from: " + reviewUrl)
+                    try:
+                        reviewPage = _read_url(reviewUrl, False)
+                        if reviewPage:
+                            reviewRegex = REVIEW_TEXT.search(reviewPage, 0)
+                            if reviewRegex:
+                                reviewText = strip_tags(reviewRegex.group(1)).strip()
+                                reviewText = checkWebChar(reviewText)
+                                if reviewText:
+                                    # Append review to existing notes or create new
+                                    if book.Notes:
+                                        book.Notes = book.Notes + chr(10) + chr(10) + "=== CHRONIQUE ===" + chr(10) + reviewText
+                                    else:
+                                        book.Notes = "=== CHRONIQUE ===" + chr(10) + reviewText
+                                    debuglog("Review scraped successfully")
+                            else:
+                                debuglog("Review text not found on chronique page")
+                        else:
+                            debuglog("Could not load review page")
+                    except:
+                        debuglog("Error fetching review: " + reviewUrl)
+                else:
+                    debuglog("No review widget found for this album")
 
             # series
             if CBSeries:
@@ -1744,7 +1821,7 @@ class ProgressBarDialog(Form):
         global bStopit
         bStopit = False
         self.Text = Trans(62)
-        self.ClientSize = System.Drawing.Size(350, 590)
+        self.ClientSize = System.Drawing.Size(350, 590)  # Original height maintained
         pIcon = (__file__[:-len('BedethequeScraper2.py')] + "BD2.ico")
         self.Icon = System.Drawing.Icon(pIcon)
         self.ControlBox = False
@@ -1754,6 +1831,18 @@ class ProgressBarDialog(Form):
         self.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Hide
         self.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
         self.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+
+        # Countdown progress bar in title area (initially hidden)
+        self.pbCountdown = ProgressBar()
+        self.pbCountdown.Size = Size(334, 3)  # Very thin bar
+        self.pbCountdown.Location = Point(8, 2)  # Just below window title bar
+        self.pbCountdown.Maximum = 100
+        self.pbCountdown.Minimum = 0
+        self.pbCountdown.Value = 0
+        self.pbCountdown.BackColor = Color.LightBlue
+        self.pbCountdown.ForeColor = Color.DodgerBlue
+        self.pbCountdown.Style = ProgressBarStyle.Continuous
+        self.pbCountdown.Visible = False
 
         self.pb = ProgressBar()
         self.traitement = Label()
@@ -1791,10 +1880,23 @@ class ProgressBarDialog(Form):
         self.cover.Size = Size(334, 478)
         self.cover.SizeMode = PictureBoxSizeMode.Zoom
 
+        self.Controls.Add(self.pbCountdown)  
         self.Controls.Add(self.pb)
         self.Controls.Add(self.traitement)
         self.Controls.Add(self.cancel)
         self.Controls.Add(self.cover)
+
+        # Timer for smooth countdown updates (250ms)
+        self._countdownTimer = System.Windows.Forms.Timer()
+        self._countdownTimer.Interval = 250  # 250ms
+        self._countdownTimer.Tick += self._OnCountdownTick
+        
+        # Countdown state
+        self._countdownTotalMs = 0
+        self._countdownElapsedMs = 0
+        self._isWaiting = False
+        self._lastCoverImage = None
+        self._lastCoverImageWithCheckmark = None
 
         # Adjust DPI scaling in this form
         HighDpiHelper.AdjustControlImagesDpiScale(self)
@@ -1816,8 +1918,116 @@ class ProgressBarDialog(Form):
 
         if nInc == 1 or not book: 
             self.cover.Image = System.Drawing.Bitmap(cCovImage)
+            # Store for display during wait countdown
+            self._lastCoverImage = System.Drawing.Bitmap(cCovImage)  
 
         HighDpiHelper.AdjustPictureBoxDpiScale(self.cover, HighDpiHelper.GetDpiScale(self))
+
+    def StartCountdown(self, totalSeconds, book):
+        self._countdownTotalMs = int(totalSeconds * 1000)
+        self._countdownElapsedMs = 0
+        self._isWaiting = True
+        
+        # Show countdown bar
+        self.pbCountdown.Visible = True
+        self.pbCountdown.Value = 0
+        self.pbCountdown.Maximum = self._countdownTotalMs
+        
+        # Update cover with checkmark overlay
+        if book:
+            cCovImage = ComicRack.App.GetComicThumbnail(book, 0)
+            baseCover = System.Drawing.Bitmap(cCovImage)
+        elif self._lastCoverImage:
+            baseCover = self._lastCoverImage
+        else:
+            baseCover = System.Drawing.Bitmap(__file__[:-len('BedethequeScraper2.py')] + "BD2.png")
+        
+        # Create cover with checkmark overlay
+        coverWithCheckmark = self._CreateCheckmarkOverlay(baseCover)
+        self.cover.Image = coverWithCheckmark
+        self._lastCoverImageWithCheckmark = coverWithCheckmark
+        
+        # Start the timer
+        self._countdownTimer.Start()
+        
+    def StopCountdown(self):
+        self._countdownTimer.Stop()
+        self._isWaiting = False
+        self.pbCountdown.Visible = False
+        self.pbCountdown.Value = 0
+        
+    def _OnCountdownTick(self, sender, e):
+        if not self._isWaiting:
+            return
+            
+        self._countdownElapsedMs += 250
+        
+        if self._countdownElapsedMs >= self._countdownTotalMs:
+            # Countdown complete
+            self.StopCountdown()
+        else:
+            # Update progress bar
+            self.pbCountdown.Value = min(self._countdownElapsedMs, self._countdownTotalMs)
+            
+            # Update status text with remaining seconds
+            remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0)
+            cPause = Trans(140).replace("%%", str(remainingSeconds))
+            self.traitement.Text = "\n" + cPause
+            
+        Application.DoEvents()
+        
+    def _CreateCheckmarkOverlay(self, baseCover):
+        # Create a copy of the cover
+        width = baseCover.Width
+        height = baseCover.Height
+        result = System.Drawing.Bitmap(width, height)
+        
+        # Draw base cover
+        g = System.Drawing.Graphics.FromImage(result)
+        g.DrawImage(baseCover, 0, 0, width, height)
+        
+        # Draw checkmark (40% of image width)
+        checkSize = int(width * 0.4)
+        checkX = int((width - checkSize) / 2)
+        checkY = int((height - checkSize) / 2)
+        
+        # Dark green color with slight transparency (86% opacity)
+        checkColor = System.Drawing.Color.FromArgb(220, 34, 139, 34) 
+        
+        # Create pen for checkmark (thick, round)
+        pen = System.Drawing.Pen(checkColor, max(8, int(checkSize / 15)))
+        pen.StartCap = System.Drawing.Drawing2D.LineCap.Round
+        pen.EndCap = System.Drawing.Drawing2D.LineCap.Round
+        pen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round
+        
+        # Enable anti-aliasing for smooth lines
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias
+        
+        # Draw checkmark as two lines forming a "✓"
+        # Short line (bottom-left to middle)
+        x1 = checkX + int(checkSize * 0.2)
+        y1 = checkY + int(checkSize * 0.5)
+        x2 = checkX + int(checkSize * 0.4)
+        y2 = checkY + int(checkSize * 0.7)
+        g.DrawLine(pen, x1, y1, x2, y2)
+        
+        # Long line (middle to top-right)
+        x3 = checkX + int(checkSize * 0.8)
+        y3 = checkY + int(checkSize * 0.3)
+        g.DrawLine(pen, x2, y2, x3, y3)
+        
+        # Clean up
+        pen.Dispose()
+        g.Dispose()
+        
+        return result
+    
+    def Dispose(self, disposing):
+        if disposing:
+            if self._countdownTimer:
+                self._countdownTimer.Stop()
+                self._countdownTimer.Dispose()
+        super(ProgressBarDialog, self).Dispose(disposing)
 
     def button_Click(self, sender, e):
 
@@ -1832,7 +2042,7 @@ def LoadSetting():
 
     global SHOWRENLOG, SHOWDBGLOG, DBGONOFF, DBGLOGMAX, RENLOGMAX, LANGENFR, aWord, ARTICLES, SUBPATT, COUNTOF, COUNTFINIE, TITLEIT, TIMEOUT, TIMEOUTS, TIMEPOPUP, FORMATARTICLES, ONESHOTFORMAT
     global TBTags, CBCover, CBStatus, CBGenre, CBNotes, CBWeb, CBCount, CBSynopsys, CBImprint, CBLetterer, CBInker, CBPrinted, CBRating, CBISBN, CBDefault, CBRescrape, AllowUserChoice, PopUpEditionForm, PadNumber, SerieResumeEverywhere
-    global CBLanguage, CBEditor, CBFormat, CBColorist, CBPenciller, CBWriter, CBTitle, CBSeries, CBCouverture, AlwaysChooseSerie, ShortWebLink, AcceptGenericArtists
+    global CBLanguage, CBEditor, CBFormat, CBColorist, CBPenciller, CBWriter, CBTitle, CBSeries, CBCouverture, AlwaysChooseSerie, ShortWebLink, AcceptGenericArtists, CBReview, CBSeriesTags
 
     ###############################################################
     # Config read #
@@ -2044,6 +2254,14 @@ def LoadSetting():
         AcceptGenericArtists = ft(MySettings.Get("AcceptGenericArtists"))
     except Exception as e:
         AcceptGenericArtists = False
+    try:
+        CBReview = ft(MySettings.Get("CBReview"))
+    except Exception as e:
+        CBReview = False
+    try:
+        CBSeriesTags = ft(MySettings.Get("CBSeriesTags"))
+    except Exception as e:
+        CBSeriesTags = False
     ###############################################################
     
     if ONESHOTFORMAT and CBFormat:
@@ -2111,6 +2329,8 @@ def SaveSetting():
     MySettings.Set("AlwaysChooseSerie", tf(AlwaysChooseSerie))
     MySettings.Set("ONESHOTFORMAT", tf(ONESHOTFORMAT))
     MySettings.Set("AcceptGenericArtists", tf(AcceptGenericArtists))
+    MySettings.Set("CBReview", tf(CBReview))
+    MySettings.Set("CBSeriesTags", tf(CBSeriesTags))
     
     if AllowUserChoice == True:
         MySettings.Set("CBStop",  "1")
@@ -2223,7 +2443,9 @@ class BDConfigForm(Form):
                 ('Web', {'label': Trans(88), 'state': if_else(CBWeb, CheckState.Checked, CheckState.Unchecked)}),
                 ('Genre', {'label': Trans(89), 'state': if_else(CBGenre, CheckState.Checked, CheckState.Unchecked)}),
                 ('Cover', {'label': Trans(90), 'state': if_else(CBCover, CheckState.Checked, CheckState.Unchecked)}),
-                ('ISBN', {'label': Trans(80), 'state': if_else(CBISBN, CheckState.Checked, CheckState.Unchecked)})
+                ('ISBN', {'label': Trans(80), 'state': if_else(CBISBN, CheckState.Checked, CheckState.Unchecked)}),
+                ('Review', {'label': Trans(152), 'state': if_else(CBReview, CheckState.Checked, CheckState.Unchecked)}),
+                ('SeriesTags', {'label': Trans(153), 'state': if_else(CBSeriesTags, CheckState.Checked, CheckState.Unchecked)})
             ])
         self._CancelButton = System.Windows.Forms.Button()
         self._OKButton = System.Windows.Forms.Button()
@@ -2926,6 +3148,8 @@ class BDConfigForm(Form):
             CBWriter = if_else(self._scrapedData['Writer']['state'] == CheckState.Checked, True, False)
             CBTitle = if_else(self._scrapedData['Title']['state'] == CheckState.Checked, True, False)
             CBSeries = if_else(self._scrapedData['Series']['state'] == CheckState.Checked, True, False)
+            CBReview = if_else(self._scrapedData['Review']['state'] == CheckState.Checked, True, False)
+            CBSeriesTags = if_else(self._scrapedData['SeriesTags']['state'] == CheckState.Checked, True, False)
             CBDefault = if_else(self._CBDefault.CheckState == CheckState.Checked, True, False)
             CBRescrape = if_else(self._CBRescrape.CheckState == CheckState.Checked, True, False)
             AllowUserChoice = if_else(self._radioChoiceUser.Checked, True, False)
