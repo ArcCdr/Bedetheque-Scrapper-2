@@ -476,8 +476,17 @@ def WorkerThread(books):
                 f.Update(cPause, 0, False)
                 f.Refresh()
                 # Graphical countdown with checkmark book cover overlay
-                f.StartCountdown(int(TIMEOUTS), book)
-                totalIterations = int(TIMEOUTS * 20)
+                timeoutSeconds = int(TIMEOUTS)
+                # Sanity check: limit to reasonable timeout (max 3600 seconds = 1 hour)
+                if timeoutSeconds > 3600:
+                    debuglog("WARNING: TIMEOUTS value too large (" + str(timeoutSeconds) + "), capping at 3600 seconds")
+                    timeoutSeconds = 3600
+                
+                f.StartCountdown(timeoutSeconds, book)
+                
+                # Check for cancellation every 50ms (responsive cancel button)
+                # Timer updates UI every 250ms independently
+                totalIterations = timeoutSeconds * 20  # 20 iterations per second
                 for ii in range(totalIterations):
                     t.CurrentThread.Join(50)
                     Application.DoEvents()
@@ -1924,40 +1933,66 @@ class ProgressBarDialog(Form):
         HighDpiHelper.AdjustPictureBoxDpiScale(self.cover, HighDpiHelper.GetDpiScale(self))
 
     def StartCountdown(self, totalSeconds, book):
+        """
+        Start the countdown timer with graphical progress bar.
+        Shows book cover with green checkmark overlay during wait.
+        
+        Args:
+            totalSeconds: Total seconds to count down
+            book: The book that was just scraped (to show its cover with checkmark)
+        """
+        # Safety check: don't start if form is disposed
+        if self.IsDisposed or not self._countdownTimer:
+            return
+            
         self._countdownTotalMs = int(totalSeconds * 1000)
         self._countdownElapsedMs = 0
         self._isWaiting = True
         
         # Show countdown bar
-        self.pbCountdown.Visible = True
-        self.pbCountdown.Value = 0
-        self.pbCountdown.Maximum = self._countdownTotalMs
+        if not self.IsDisposed and self.pbCountdown:
+            self.pbCountdown.Visible = True
+            self.pbCountdown.Value = 0
+            self.pbCountdown.Maximum = self._countdownTotalMs
         
         # Update cover with checkmark overlay
-        if book:
-            cCovImage = ComicRack.App.GetComicThumbnail(book, 0)
-            baseCover = System.Drawing.Bitmap(cCovImage)
-        elif self._lastCoverImage:
-            baseCover = self._lastCoverImage
-        else:
-            baseCover = System.Drawing.Bitmap(__file__[:-len('BedethequeScraper2.py')] + "BD2.png")
-        
-        # Create cover with checkmark overlay
-        coverWithCheckmark = self._CreateCheckmarkOverlay(baseCover)
-        self.cover.Image = coverWithCheckmark
-        self._lastCoverImageWithCheckmark = coverWithCheckmark
+        if not self.IsDisposed:
+            if book:
+                cCovImage = ComicRack.App.GetComicThumbnail(book, 0)
+                baseCover = System.Drawing.Bitmap(cCovImage)
+            elif self._lastCoverImage:
+                baseCover = self._lastCoverImage
+            else:
+                baseCover = System.Drawing.Bitmap(__file__[:-len('BedethequeScraper2.py')] + "BD2.png")
+            
+            # Create cover with checkmark overlay
+            coverWithCheckmark = self._CreateCheckmarkOverlay(baseCover)
+            if self.cover:
+                self.cover.Image = coverWithCheckmark
+            self._lastCoverImageWithCheckmark = coverWithCheckmark
         
         # Start the timer
-        self._countdownTimer.Start()
+        if self._countdownTimer and not self.IsDisposed:
+            self._countdownTimer.Start()
         
     def StopCountdown(self):
-        self._countdownTimer.Stop()
+        """Stop the countdown timer and hide the countdown bar."""
+        if self._countdownTimer:
+            self._countdownTimer.Stop()
         self._isWaiting = False
-        self.pbCountdown.Visible = False
-        self.pbCountdown.Value = 0
+        if not self.IsDisposed and self.pbCountdown:
+            self.pbCountdown.Visible = False
+            self.pbCountdown.Value = 0
         
     def _OnCountdownTick(self, sender, e):
-        if not self._isWaiting:
+        """
+        Timer tick handler - updates countdown progress every 250ms.
+        Called by the UI thread, so thread-safe.
+        """
+        # Safety check: don't access disposed controls
+        if self.IsDisposed or not self._isWaiting:
+            if self._countdownTimer:
+                self._countdownTimer.Stop()
             return
             
         self._countdownElapsedMs += 250
@@ -1966,13 +2001,15 @@ class ProgressBarDialog(Form):
             # Countdown complete
             self.StopCountdown()
         else:
-            # Update progress bar
-            self.pbCountdown.Value = min(self._countdownElapsedMs, self._countdownTotalMs)
+            # Update progress bar (with safety check)
+            if not self.IsDisposed and self.pbCountdown:
+                self.pbCountdown.Value = min(self._countdownElapsedMs, self._countdownTotalMs)
             
-            # Update status text with remaining seconds
-            remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0)
-            cPause = Trans(140).replace("%%", str(remainingSeconds))
-            self.traitement.Text = "\n" + cPause
+            # Update status text with remaining seconds (with safety check)
+            if not self.IsDisposed and self.traitement:
+                remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0)
+                cPause = Trans(140).replace("%%", str(remainingSeconds))
+                self.traitement.Text = "\n" + cPause
             
         Application.DoEvents()
         
@@ -2023,10 +2060,23 @@ class ProgressBarDialog(Form):
         return result
     
     def Dispose(self, disposing):
+        """Override Dispose to clean up timer resources and prevent access to disposed controls."""
         if disposing:
+            # Stop countdown first to prevent timer from firing during disposal
+            self._isWaiting = False
             if self._countdownTimer:
-                self._countdownTimer.Stop()
-                self._countdownTimer.Dispose()
+                try:
+                    self._countdownTimer.Stop()
+                    self._countdownTimer.Dispose()
+                    self._countdownTimer = None
+                except:
+                    pass  # Ignore errors during disposal
+        
+        # Call base class Dispose
+        try:
+            super(ProgressBarDialog, self).Dispose(disposing)
+        except:
+            pass  # Ignore errors during disposal
         super(ProgressBarDialog, self).Dispose(disposing)
 
     def button_Click(self, sender, e):
@@ -3115,7 +3165,7 @@ class BDConfigForm(Form):
 
         global SHOWRENLOG, SHOWDBGLOG, DBGONOFF, DBGLOGMAX, RENLOGMAX, LANGENFR, aWord, ONESHOTFORMAT
         global TBTags, CBCover, CBStatus, CBGenre, CBNotes, CBWeb, CBCount, CBSynopsys, CBImprint, CBLetterer, CBInker, CBPrinted, CBRating, CBISBN, CBDefault, CBRescrape, AllowUserChoice, PopUpEditionForm, SerieResumeEverywhere, AcceptGenericArtists
-        global CBLanguage, CBEditor, CBFormat, CBColorist, CBPenciller, CBWriter, CBTitle, CBSeries, ARTICLES, SUBPATT, COUNTOF, CBCouverture, COUNTFINIE, TITLEIT, TIMEOUT, TIMEOUTS, TIMEPOPUP, FORMATARTICLES, PadNumber, AlwaysChooseSerie, ShortWebLink
+        global CBLanguage, CBEditor, CBFormat, CBColorist, CBPenciller, CBWriter, CBTitle, CBSeries, ARTICLES, SUBPATT, COUNTOF, CBCouverture, COUNTFINIE, TITLEIT, TIMEOUT, TIMEOUTS, TIMEPOPUP, FORMATARTICLES, PadNumber, AlwaysChooseSerie, ShortWebLink, CBReview, CBSeriesTags
 
         if sender.Name.CompareTo(self._OKButton.Name) == 0:
             SHOWRENLOG = if_else(self._SHOWRENLOG.CheckState == CheckState.Checked, True, False)
