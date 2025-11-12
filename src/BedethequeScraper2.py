@@ -108,6 +108,7 @@ AlwaysChooseSerie = False
 TimerExpired = False
 SkipAlbum = False
 log_messages = []
+UserInteractionTime = 0  # Track time spent in user dialogs (in seconds)
 
 ########################################
 # Nombres auteurs
@@ -329,7 +330,7 @@ def BD_start(books):
 def WorkerThread(books):
 
     global AlbumNumNum, dlgNumber, dlgName, dlgNameClean, nRenamed, nIgnored, dlgAltNumber, bError
-    global PickSeries, serie_rech_prev, Shadow1, Shadow2, log_messages
+    global PickSeries, serie_rech_prev, Shadow1, Shadow2, log_messages, UserInteractionTime
 
     t = Thread(ThreadStart(thread_proc))
 
@@ -364,6 +365,7 @@ def WorkerThread(books):
         for book in books:
 
             TimeBookStart = clock()
+            UserInteractionTime = 0  # Reset interaction time for each book
             debuglog("v" * 60)
 
             if bStopit or (nTIMEDOUT == int(TIMEOUT)):
@@ -472,21 +474,26 @@ def WorkerThread(books):
 
             # timeout in seconds before next scrape
             if TIMEOUTS and nOrigBooks > nIgnored + nRenamed:
-                # cPause = Trans(140).replace("%%", str(TIMEOUTS))
-                # f.Update(cPause, 0, False)
-                # f.Refresh()
                 # Graphical countdown with checkmark book cover overlay
                 timeoutSeconds = int(TIMEOUTS)
-                f.StartCountdown(timeoutSeconds, book)
-                totalIterations = timeoutSeconds * 20
-                for ii in range(totalIterations):
-                    t.CurrentThread.Join(50)
-                    Application.DoEvents()
-                    if bStopit:
-                        f.StopCountdown()
-                        debuglog("Cancelled from WorkerThread TIMEOUT Loop")
-                        return
-                f.StopCountdown()                
+                
+                # Subtract user interaction time in dialogs from timeout
+                adjustedTimeout = timeoutSeconds - int(UserInteractionTime)
+                if adjustedTimeout > 0:
+                    debuglog("Timeout adjusted: " + str(timeoutSeconds) + "s configured - " + str(int(UserInteractionTime)) + "s user interaction = " + str(adjustedTimeout) + "s wait")
+                    f.StartCountdown(adjustedTimeout, book)
+                    totalIterations = adjustedTimeout * 20
+                    for ii in range(totalIterations):
+                        t.CurrentThread.Join(50)
+                        Application.DoEvents()
+                        if bStopit:
+                            f.StopCountdown()
+                            debuglog("Cancelled from WorkerThread TIMEOUT Loop")
+                            return
+                    f.StopCountdown()
+                else:
+                    debuglog("Timeout skipped: user interaction (" + str(int(UserInteractionTime)) + "s) >= configured timeout (" + str(timeoutSeconds) + "s)")
+                    
             if bStopit:
                 debuglog("Cancelled from WorkerThread End")
                 return
@@ -537,7 +544,7 @@ def WorkerThread(books):
 
 def SetSerieId(book, serie, num, nBooksIn):
 
-    global ListSeries, NewLink, NewSeries, RenameSeries, PickSeries, PickSeriesLink, serie_rech_prev
+    global ListSeries, NewLink, NewSeries, RenameSeries, PickSeries, PickSeriesLink, serie_rech_prev, UserInteractionTime
     
     if serie:
         if re.match("[a-z]", remove_accents(serie[0]).lower()):
@@ -646,7 +653,12 @@ def SetSerieId(book, serie, num, nBooksIn):
                 NewSeries = ''
                 a = ListSeries
                 pickAseries = SeriesForm(serie, ListSeries, FormType.SERIE)
+                
+                # Track time spent in user dialog
+                dialogStartTime = clock()
                 result = pickAseries.ShowDialog()
+                dialogEndTime = clock()
+                UserInteractionTime += (dialogEndTime - dialogStartTime)
 
                 if result == DialogResult.Cancel:
                     debuglog(Trans(24) + checkWebChar(serie) + "]")
@@ -975,7 +987,7 @@ ListAlbum elements:
 """
 def AlbumChooser(ListAlbum):
 
-    global NewLink, SkipAlbum
+    global NewLink, SkipAlbum, UserInteractionTime
 
     albumURL = ""
     debuglog("Nbr. d'item dans la Liste Album est de: " + str(len(ListAlbum)))
@@ -984,7 +996,12 @@ def AlbumChooser(ListAlbum):
             NewLink = ""
             NewSeries = ""
             pickAnAlbum = SeriesForm(dlgNumber, ListAlbum, FormType.ALBUM)
+            
+            # Track time spent in user dialog
+            dialogStartTime = clock()
             result = pickAnAlbum.ShowDialog()
+            dialogEndTime = clock()
+            UserInteractionTime += (dialogEndTime - dialogStartTime)
                 
             if result == DialogResult.Cancel:
                 if TIMEPOPUP != "0" and TimerExpired:
@@ -1154,7 +1171,7 @@ class AlbumInfo:
 
 def parseAlbumInfo(book, pageUrl, num, lDirect = False):
 
-    global CBelid, NewLink, NewSeries
+    global CBelid, NewLink, NewSeries, UserInteractionTime
 
     debuglog("=" * 60)
     debuglog("parseAlbumInfo", "a)", pageUrl, "b)", num , "c)", lDirect)
@@ -1262,7 +1279,12 @@ def parseAlbumInfo(book, pageUrl, num, lDirect = False):
                 NewLink = ""
                 NewSeries = ""
                 pickAvar = SeriesForm(num, ListAlbum, FormType.EDITION)
+                
+                # Track time spent in user dialog
+                dialogStartTime = clock()
                 result = pickAvar.ShowDialog()
+                dialogEndTime = clock()
+                UserInteractionTime += (dialogEndTime - dialogStartTime)
 
                 if result == DialogResult.Cancel:
                     pickedVar = ListAlbum[0][1]
