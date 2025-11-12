@@ -1921,22 +1921,9 @@ class ProgressBarDialog(Form):
         self._lastCoverImage = None
         self._lastCoverImageWithCheckmark = None
 
-        # Handle form closing to clean up timer
-        self.FormClosed += self._OnFormClosed
-
         # Adjust DPI scaling in this form
         HighDpiHelper.AdjustControlImagesDpiScale(self)
         ThemeMe(self)
-    
-    def _OnFormClosed(self, sender, e):
-        """Clean up timer when form is closed."""
-        self._isWaiting = False
-        if self._countdownTimer:
-            try:
-                self._countdownTimer.Stop()
-                self._countdownTimer.Dispose()
-            except:
-                pass
 
     def Update(self, cText, nInc = 1, book = False):
 
@@ -1952,9 +1939,21 @@ class ProgressBarDialog(Form):
         else:
             cCovImage = (__file__[:-len('BedethequeScraper2.py')] + "BD2.png")
 
-        if nInc == 1 or not book: 
+        if nInc == 1 or not book:
+            # Dispose old cover image before replacing
+            if self.cover.Image:
+                try:
+                    self.cover.Image.Dispose()
+                except:
+                    pass
             self.cover.Image = System.Drawing.Bitmap(cCovImage)
-            # Store for display during wait countdown
+            
+            # Dispose old cached image before replacing
+            if self._lastCoverImage:
+                try:
+                    self._lastCoverImage.Dispose()
+                except:
+                    pass
             self._lastCoverImage = System.Drawing.Bitmap(cCovImage)  
 
         HighDpiHelper.AdjustPictureBoxDpiScale(self.cover, HighDpiHelper.GetDpiScale(self))
@@ -1975,20 +1974,52 @@ class ProgressBarDialog(Form):
             self.pbCountdown.Value = self._countdownTotalMs
         
         # Update cover with checkmark overlay
+        baseCover = None
+        needsDispose = False
+        
         if not self.IsDisposed:
             if book:
                 cCovImage = ComicRack.App.GetComicThumbnail(book, 0)
                 baseCover = System.Drawing.Bitmap(cCovImage)
+                needsDispose = True  # We created this, must dispose it
             elif self._lastCoverImage:
                 baseCover = self._lastCoverImage
+                needsDispose = False  # We don't own this, don't dispose
             else:
                 baseCover = System.Drawing.Bitmap(__file__[:-len('BedethequeScraper2.py')] + "BD2.png")
+                needsDispose = True  # We created this, must dispose it
             
             # Create cover with checkmark overlay
-            coverWithCheckmark = self._CreateCheckmarkOverlay(baseCover)
-            if self.cover:
-                self.cover.Image = coverWithCheckmark
-            self._lastCoverImageWithCheckmark = coverWithCheckmark
+            if baseCover:
+                coverWithCheckmark = self._CreateCheckmarkOverlay(baseCover)
+                
+                # Dispose temporary baseCover if we created it
+                if needsDispose:
+                    try:
+                        baseCover.Dispose()
+                    except:
+                        pass
+                
+                # Dispose old checkmark image before replacing
+                if self._lastCoverImageWithCheckmark:
+                    try:
+                        self._lastCoverImageWithCheckmark.Dispose()
+                    except:
+                        pass
+                
+                # Dispose old cover image before replacing
+                if self.cover and self.cover.Image:
+                    try:
+                        oldImage = self.cover.Image
+                        self.cover.Image = coverWithCheckmark
+                        oldImage.Dispose()
+                    except:
+                        self.cover.Image = coverWithCheckmark
+                else:
+                    if self.cover:
+                        self.cover.Image = coverWithCheckmark
+                
+                self._lastCoverImageWithCheckmark = coverWithCheckmark
         
         # Start the timer
         if self._countdownTimer and not self.IsDisposed:
@@ -2025,8 +2056,6 @@ class ProgressBarDialog(Form):
                 remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0) + 1
                 cPause = Trans(140).replace("%%", str(remainingSeconds))
                 self.traitement.Text = "\n" + cPause
-            
-        Application.DoEvents()
         
     def _CreateCheckmarkOverlay(self, baseCover):
         # Create a copy of the cover
@@ -2075,6 +2104,45 @@ class ProgressBarDialog(Form):
         
         return result
 
+    def Dispose(self, disposing):
+        """Properly dispose of all resources."""
+        if disposing:
+            # Stop and dispose timer first
+            if self._countdownTimer:
+                try:
+                    self._countdownTimer.Stop()
+                    self._countdownTimer.Tick -= self._OnCountdownTick
+                    self._countdownTimer.Dispose()
+                except:
+                    pass
+                self._countdownTimer = None
+            
+            # Dispose cached bitmaps
+            if self._lastCoverImage:
+                try:
+                    self._lastCoverImage.Dispose()
+                except:
+                    pass
+                self._lastCoverImage = None
+                
+            if self._lastCoverImageWithCheckmark:
+                try:
+                    self._lastCoverImageWithCheckmark.Dispose()
+                except:
+                    pass
+                self._lastCoverImageWithCheckmark = None
+            
+            # Dispose cover image in PictureBox
+            if self.cover and self.cover.Image:
+                try:
+                    self.cover.Image.Dispose()
+                except:
+                    pass
+                self.cover.Image = None
+        
+        # Call base class Dispose using .NET Framework pattern
+        Form.Dispose(self, disposing)
+
     def button_Click(self, sender, e):
 
         global bStopit
@@ -2083,6 +2151,7 @@ class ProgressBarDialog(Form):
         if sender.Name.CompareTo(self.cancel.Name) == 0:
             debuglog("Cancel button pressed")
             bStopit = True
+
 
 def LoadSetting():
 
