@@ -229,7 +229,8 @@ ALBUM_INFOEDITION_PATTERN = r'<em>Info\s.*?dition\s:\s?</em>\s?(.*?)<'
 ALBUM_INFOEDITION = re.compile(ALBUM_INFOEDITION_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 # Album review pattern (chronique widget)
-ALBUM_REVIEW_WIDGET_PATTERN = r'<div\sclass="magazine-widget\schronique">.*?<a\shref="(https://www\.bdgest\.com/chronique-[^"]+)"'
+# Updated to handle both URL formats: chronique-XXX and chronique/detail/id/XXX
+ALBUM_REVIEW_WIDGET_PATTERN = r'<div\sclass="magazine-widget\schronique">.*?<a\shref="(https://www\.bdgest\.com/chronique[/-][^"]+)"'
 ALBUM_REVIEW_WIDGET = re.compile(ALBUM_REVIEW_WIDGET_PATTERN, re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 # Review text pattern (from chronique page)
