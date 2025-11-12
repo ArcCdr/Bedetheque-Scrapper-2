@@ -1899,9 +1899,22 @@ class ProgressBarDialog(Form):
         self._lastCoverImage = None
         self._lastCoverImageWithCheckmark = None
 
+        # Handle form closing to clean up timer
+        self.FormClosed += self._OnFormClosed
+
         # Adjust DPI scaling in this form
         HighDpiHelper.AdjustControlImagesDpiScale(self)
         ThemeMe(self)
+    
+    def _OnFormClosed(self, sender, e):
+        """Clean up timer when form is closed."""
+        self._isWaiting = False
+        if self._countdownTimer:
+            try:
+                self._countdownTimer.Stop()
+                self._countdownTimer.Dispose()
+            except:
+                pass
 
     def Update(self, cText, nInc = 1, book = False):
 
@@ -2039,24 +2052,6 @@ class ProgressBarDialog(Form):
         g.Dispose()
         
         return result
-    
-    def Dispose(self, disposing):
-        if disposing:
-            # Stop countdown first to prevent timer from firing during disposal
-            self._isWaiting = False
-            if self._countdownTimer:
-                try:
-                    self._countdownTimer.Stop()
-                    self._countdownTimer.Dispose()
-                    self._countdownTimer = None
-                except:
-                    pass  # Ignore errors during disposal
-        
-        # Call base class Dispose
-        try:
-            super(ProgressBarDialog, self).Dispose(disposing)
-        except:
-            pass  # Ignore errors during disposal
 
     def button_Click(self, sender, e):
 
