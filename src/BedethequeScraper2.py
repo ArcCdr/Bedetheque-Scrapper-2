@@ -472,9 +472,9 @@ def WorkerThread(books):
 
             # timeout in seconds before next scrape
             if TIMEOUTS and nOrigBooks > nIgnored + nRenamed:
-                cPause = Trans(140).replace("%%", str(TIMEOUTS))
-                f.Update(cPause, 0, False)
-                f.Refresh()
+                # cPause = Trans(140).replace("%%", str(TIMEOUTS))
+                # f.Update(cPause, 0, False)
+                # f.Refresh()
                 # Graphical countdown with checkmark book cover overlay
                 timeoutSeconds = int(TIMEOUTS)
                 f.StartCountdown(timeoutSeconds, book)
@@ -1925,14 +1925,6 @@ class ProgressBarDialog(Form):
         HighDpiHelper.AdjustPictureBoxDpiScale(self.cover, HighDpiHelper.GetDpiScale(self))
 
     def StartCountdown(self, totalSeconds, book):
-        """
-        Start the countdown timer with graphical progress bar.
-        Shows book cover with green checkmark overlay during wait.
-        
-        Args:
-            totalSeconds: Total seconds to count down
-            book: The book that was just scraped (to show its cover with checkmark)
-        """
         # Safety check: don't start if form is disposed
         if self.IsDisposed or not self._countdownTimer:
             return
@@ -1995,7 +1987,7 @@ class ProgressBarDialog(Form):
             
             # Update status text with remaining seconds (with safety check)
             if not self.IsDisposed and self.traitement:
-                remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0)
+                remainingSeconds = int((self._countdownTotalMs - self._countdownElapsedMs) / 1000.0) + 1
                 cPause = Trans(140).replace("%%", str(remainingSeconds))
                 self.traitement.Text = "\n" + cPause
             
@@ -2049,7 +2041,6 @@ class ProgressBarDialog(Form):
         return result
     
     def Dispose(self, disposing):
-        """Override Dispose to clean up timer resources and prevent access to disposed controls."""
         if disposing:
             # Stop countdown first to prevent timer from firing during disposal
             self._isWaiting = False
@@ -2066,7 +2057,6 @@ class ProgressBarDialog(Form):
             super(ProgressBarDialog, self).Dispose(disposing)
         except:
             pass  # Ignore errors during disposal
-        super(ProgressBarDialog, self).Dispose(disposing)
 
     def button_Click(self, sender, e):
 
